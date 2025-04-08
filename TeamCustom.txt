@@ -4,8 +4,8 @@
 #Extends "Modes/TrackMania/Base/RoundsBase2.Script.txt"
 
 #Const CompatibleMapTypes	"Race"
-#Const Version							"2018-04-23"
-#Const ScriptName						"Modes/TrackMania/Team/Team.Script.txt"
+#Const Version							"2025-04-08"
+#Const ScriptName						"Modes/TM2020-Gamemodes/TeamCustom.Script.txt"
 
 // ---------------------------------- //
 // Libraries
@@ -31,6 +31,11 @@
 #Setting S_NbPlayersPerTeamMin	3	as "<hidden>" //_("Minimum number of players per team in matchmaking")
 
 #Setting S_ScriptEnvironment "production"/*/"development"*/
+
+//Ucce
+#Setting S_PointsWonFirstPos 1 as _("Number of points a team gains if the player that gets 1st position is from that team :")
+#Setting S_PointsLostLastPlace 1 as _("Number of points a team loses if the player that gets last position (or DNFs) is from that team :")
+#Setting S_PointsWonSumSinglePlayerPoints 2 as _("Number of points a team gains if the sum of its players points is more than the other :")
 
 // ---------------------------------- //
 // Constants
@@ -442,6 +447,43 @@ Void AnnounceWinner(Integer _TeamNum) {
 	}
 }
 
+Void RecapRound(Integer _PointsDeltaT1, Integer _PointsDeltaT2) {
+	if ( _PointsDeltaT1 == _PointsDeltaT2) {
+		if (_PointsDeltaT1 > 0) {
+			UIManager.UIAll.SendChat(TL::Compose(_("Entrambe le squadre hanno fatto %1 punti!"), "$t$0f0"^TL::ToText(_PointsDeltaT1)));
+		}
+		else if (_PointsDeltaT1 == 0) {
+			UIManager.UIAll.SendChat(TL::Compose(_("Entrambe le squadre hanno fatto %1 punti!"), "$t$fb0"^TL::ToText(_PointsDeltaT1)));
+		}
+		else {
+			UIManager.UIAll.SendChat(TL::Compose(_("Entrambe le squadre hanno perso %1 punti!"), "$t$f00"^TL::ToText(_PointsDeltaT1)));
+		}
+	}
+	else {
+		//Team 1
+		if (_PointsDeltaT1 > 0) {
+			UIManager.UIAll.SendChat(TL::Compose(_("$<%1$> ha fatto %2 punti!"), Teams[0].ColorizedName, "$t$0f0"^TL::ToText(_PointsDeltaT1)));
+		}
+		else if (_PointsDeltaT1 == 0) {
+			UIManager.UIAll.SendChat(TL::Compose(_("$<%1$> ha fatto %2 punti!"), Teams[0].ColorizedName, "$t$fb0"^TL::ToText(_PointsDeltaT1)));
+		}
+		else {
+			UIManager.UIAll.SendChat(TL::Compose(_("$<%1$> ha perso %2 punti!"), Teams[0].ColorizedName, "$t$f00"^TL::ToText(_PointsDeltaT1)));
+		}
+		
+		//Team 2
+		if (_PointsDeltaT2 > 0) {
+			UIManager.UIAll.SendChat(TL::Compose(_("$<%1$> ha fatto %2 punti!"), Teams[1].ColorizedName, "$t$0f0"^TL::ToText(_PointsDeltaT2)));
+		}
+		else if (_PointsDeltaT2 == 0) {
+			UIManager.UIAll.SendChat(TL::Compose(_("$<%1$> ha fatto %2 punti!"), Teams[1].ColorizedName, "$t$fb0"^TL::ToText(_PointsDeltaT2)));
+		}
+		else {
+			UIManager.UIAll.SendChat(TL::Compose(_("$<%1$> ha perso %2 punti!"), Teams[1].ColorizedName, "$t$f00"^TL::ToText(_PointsDeltaT2)));
+		}
+	}
+}
+
 // ---------------------------------- //
 /// Compute the latest race scores
 Void ComputeLatestRaceScores() {
@@ -454,6 +496,14 @@ Void ComputeLatestRaceScores() {
 		declare WinningTeam = -1;
 		declare Key = 0;
 		declare PointsRepartition = Scores::GetPointsRepartition();
+		//Ucce
+		declare PointsSumWinnerTeam = -1; //0 = Team 1, 1 = Team 2
+		declare FirstPlacementTeam = -1; //0 = Team 1, 1 = Team 2
+		declare LastPlacementTeam = -1; //0 = Team 1, 1 = Team 2, 2 = Both
+		declare TempPrevRaceTime = -1; //0 = Team 1, 1 = Team 2, 2 = Both
+		declare Team1DNF = 0;
+		declare Team2DNF = 0;
+		
 		foreach (Score in Scores) {
 			if (Score.TeamNum != 1 && Score.TeamNum != 2) continue;
 			
@@ -468,17 +518,36 @@ Void ComputeLatestRaceScores() {
 				}
 				TeamsScores[Score.TeamNum - 1] += PlayerPoints;
 				Scores::SetPlayerRoundPoints(Score, PlayerPoints);
+				if (Key == 0) {
+					FirstPlacementTeam = Score.TeamNum - 1;
+				}
+				if (Scores::GetPlayerPrevRaceTime(Score) >= TempPrevRaceTime) {
+					LastPlacementTeam = Score.TeamNum - 1;
+				}
+				TempPrevRaceTime = Scores::GetPlayerPrevRaceTime(Score);
 				Key += 1;
 			} else {
 				Scores::SetPlayerRoundPoints(Score, 0);
+				if (Score.TeamNum == 1) {
+					Team1DNF = 1;
+					LastPlacementTeam = 0;
+				}
+				else if (Score.TeamNum == 2 {
+					Team2DNF = 1;
+					LastPlacementTeam = 1;
+				}
+				
+				if (Team1DNF == 1 && Team2DNF == 1) {
+					LastPlacementTeam = 2;
+				}
 			}
 		}
 		
 		if (TeamsScores[0] != TeamsScores[1]) {
 			if (TeamsScores[0] > TeamsScores[1]) {
-				WinningTeam = 0;
+				PointsSumWinnerTeam = 0;
 			} else {
-				WinningTeam = 1;
+				PointsSumWinnerTeam = 1;
 			}
 		}
 		
@@ -490,10 +559,17 @@ Void ComputeLatestRaceScores() {
 					PrevRaceDeltaPoints = TeamsScores[TeamIndex];
 				}
 			} else {
-				if (TeamIndex == WinningTeam) {
-					PrevRaceDeltaPoints = 1;
+				PrevRaceDeltaPoints = 0;
+				if (TeamIndex == FirstPlacementTeam) {
+					PrevRaceDeltaPoints += 1;
+				}
+				if (TeamIndex == LastPlacementTeam || LastPlacementTeam == 2) {
+					PrevRaceDeltaPoints -= 1;
+				}
+				if (TeamIndex == PointsSumWinnerTeam) {
+					PrevRaceDeltaPoints += 2;
 				} else {
-					PrevRaceDeltaPoints = 0;
+					PrevRaceDeltaPoints += 0;
 				}
 			}
 		}
@@ -516,23 +592,50 @@ Void ComputeLatestRaceScores() {
 		
 		declare TeamsScores = [0, 0];
 		declare WinningTeam = -1;
+		//Ucce
+		declare PointsSumWinnerTeam = -1; //0 = Team 1, 1 = Team 2
+		declare FirstPlacementTeam = -1; //0 = Team 1, 1 = Team 2
+		declare LastPlacementTeam = -1; //0 = Team 1, 1 = Team 2, 2 = Both
+		declare TempPrevRaceTime = -1; //0 = Team 1, 1 = Team 2, 2 = Both
+		declare Team1DNF = 0;
+		declare Team2DNF = 0;
+		
 		foreach (Score in Scores) {
 			if (Score.TeamNum != 1 && Score.TeamNum != 2) continue;
 			
 			if (Scores::GetPlayerPrevRaceTime(Score) > 0) {
 				TeamsScores[Score.TeamNum - 1] += Points;
 				Scores::SetPlayerRoundPoints(Score, Points);
+				if (Points == S_MaxPointsPerRound) {
+					FirstPlacementTeam = Score.TeamNum - 1;
+				}
+				if (Scores::GetPlayerPrevRaceTime(Score) >= TempPrevRaceTime) {
+					LastPlacementTeam = Score.TeamNum - 1;
+				}
+				TempPrevRaceTime = Scores::GetPlayerPrevRaceTime(Score);
 				if (Points > 0) Points -= 1;
 			} else {
+				if (Score.TeamNum == 1) {
+					Team1DNF = 1;
+					LastPlacementTeam = 0;
+				}
+				else if (Score.TeamNum == 2 {
+					Team2DNF = 1;
+					LastPlacementTeam = 1;
+				}
+				
+				if (Team1DNF == 1 && Team2DNF == 1) {
+					LastPlacementTeam = 2;
+				}
 				Scores::SetPlayerRoundPoints(Score, 0);
 			}
 		}
 		
 		if (TeamsScores[0] != TeamsScores[1]) {
 			if (TeamsScores[0] > TeamsScores[1]) {
-				WinningTeam = 0;
+				PointsSumWinnerTeam = 0;
 			} else {
-				WinningTeam = 1;
+				PointsSumWinnerTeam = 1;
 			}
 		}
 		
@@ -544,10 +647,17 @@ Void ComputeLatestRaceScores() {
 					PrevRaceDeltaPoints = TeamsScores[TeamIndex];
 				}
 			} else {
-				if (TeamIndex == WinningTeam) {
-					PrevRaceDeltaPoints = 1;
+				PrevRaceDeltaPoints = 0;
+				if (TeamIndex == FirstPlacementTeam) {
+					PrevRaceDeltaPoints += S_PointsWonFirstPos;
+				}
+				if (TeamIndex == LastPlacementTeam || LastPlacementTeam == 2) {
+					PrevRaceDeltaPoints -= S_PointsLostLastPlace;
+				}
+				if (TeamIndex == PointsSumWinnerTeam) {
+					PrevRaceDeltaPoints += S_PointsWonSumSinglePlayerPoints;
 				} else {
-					PrevRaceDeltaPoints = 0;
+					PrevRaceDeltaPoints += 0;
 				}
 			}
 		}
@@ -600,7 +710,9 @@ Void ComputeScores() {
 		WinningTeam = 1;
 	}
 	
-	AnnounceWinner(WinningTeam);
+	//Ucce
+	//AnnounceWinner(WinningTeam);
+	RecapRound(ScoreTeam0, ScoreTeam1);
 	
 	foreach (TeamIndex => Team in Teams) {
 		declare PrevRaceDeltaPoints for Team = 0;
